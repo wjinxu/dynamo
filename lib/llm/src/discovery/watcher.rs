@@ -389,7 +389,7 @@ impl ModelWatcher {
                 }
             })
         });
-
+        // 模型发现 Controller 控制器
         ModelDiscoveryController::new(Arc::clone(&self))
             .run(discovery_stream, namespace_filter)
             .await;
@@ -403,7 +403,7 @@ impl ModelWatcher {
             dispatch_handle.abort();
         }
     }
-
+    // 发现了一个 worker 为这个 worker 准备前端所需要的对象
     /// Build a complete WorkerSet off-side. The controller is the only caller that may publish it.
     async fn prepare_worker_set(
         &self,
@@ -1068,7 +1068,7 @@ impl ControllerHost for ModelWatcher {
             video_contract,
         }))
     }
-
+    // 发现一个 worker 之后调用这个函数
     async fn prepare(
         &self,
         spec: GroupSpec,

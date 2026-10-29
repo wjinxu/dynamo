@@ -2445,12 +2445,13 @@ async fn pooling(
     inflight.mark_ok();
     Ok(response)
 }
-
+// 真实处理 /v1/chat/completions
 async fn handler_chat_completions(
     State((state, template)): State<(Arc<service_v2::State>, Option<RequestTemplate>)>,
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response, ErrorResponse> {
+    // 解析请求之类的，不管
     let request_id = get_or_create_request_id(&headers);
     let lifecycle = LifecycleTrace::frontend_request_without_session(request_id.as_str());
     let lifecycle_request = lifecycle.start_request();
@@ -2478,7 +2479,10 @@ async fn handler_chat_completions(
     if *FORCE_INCLUDE_USAGE && request.inner.stream.unwrap_or(false) {
         delta_common::force_include_usage(&mut request.inner.stream_options);
     }
-
+    // 询问是否准备好 + 需要用哪个模型
+    // 检查模型是否有可以服务的 worker
+    // 已经注册模型但不能服务 504
+    // 模型不存在 404
     // return a 503 if the service is not ready (process-level + per-model
     // serving readiness). An aggregated request to a decode-only namespace
     // would otherwise hang/crash on the decode worker. Resolve the templated
@@ -2509,7 +2513,7 @@ async fn handler_chat_completions(
     }
     request.nvext =
         apply_frontend_nvext_policy(request.nvext.take(), &headers, state.nvext_enabled());
-
+    // 包装 request 然后把一个普通请求变成带上下文的请求
     // create the context for the request
     let streaming = request.inner.stream.unwrap_or(false);
     let resolved_model = resolve_request_model(&request.inner.model, template.as_ref());
@@ -2567,6 +2571,7 @@ async fn handler_chat_completions(
     // Keep the HTTP-side guard armed while awaiting the detached task. A client
     // disconnect drops this handler, but the task can continue until a backend
     // timeout; that later error must not replace the observed cancellation.
+    // 交给一个独立的异步任务，交给后端 vLLM/sglang 进行推理
     let response = match tokio::spawn(
         classify_lifecycle_response(
             chat_completions(
@@ -3547,7 +3552,7 @@ async fn chat_completions(
     }
 
     tracing::trace!("Getting chat completions engine for model: {}", model);
-
+    // 找到对应的模型 engine，这是前端流水线
     let (engine, parsing_options) = state
         .manager()
         .get_chat_completions_engine_with_parsing(&model)
@@ -3594,6 +3599,7 @@ async fn chat_completions(
     let annotations = request.annotations();
 
     // issue the generate call on the engine
+    // 然后产生对应的请求，拿到 engine
     let stream = engine.generate(request).await.map_err(|e| {
         if super::metrics::request_was_rejected(e.as_ref()) {
             state
@@ -4790,13 +4796,17 @@ pub fn chat_completions_router(
     template: Option<RequestTemplate>,
     path: Option<String>,
 ) -> (Vec<RouteDoc>, Router) {
+    // 收到 POST /v1/chat/completions
+    // → 调用 handler_chat_completions()
     let path = path.unwrap_or("/v1/chat/completions".to_string());
     let doc = RouteDoc::new(axum::http::Method::POST, &path);
+    // 创建一个 Router
     let router = Router::new()
         .route(&path, post(handler_chat_completions))
         .layer(middleware::from_fn(smart_json_error_middleware))
         .layer(axum::extract::DefaultBodyLimit::max(get_body_limit()))
         .with_state((state, template));
+        // POST /v1/chat/completions → handler_chat_completions()
     (vec![doc], router)
 }
 

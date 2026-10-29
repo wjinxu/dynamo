@@ -88,7 +88,7 @@ impl HttpFrontend {
     }
 
     /// Run the frontend until it exits.
-    pub async fn run(
+    pub async fn run( // 检查配置、准备追踪功能、调用真正的服务启动逻辑
         self,
         distributed_runtime: DistributedRuntime,
         engine_config: EngineConfig,
@@ -102,13 +102,13 @@ impl HttpFrontend {
         {
             anyhow::bail!("request classifiers require --router-mode kv");
         }
-        if self.plugins.has_custom_plugins()
+        if self.plugins.has_custom_plugins() // 自定义插件
             && !matches!(&engine_config, EngineConfig::Dynamic { .. })
         {
             anyhow::bail!("custom router plugins require a dynamic engine");
         }
 
-        let plugins = RouterPluginBuilder::new(self.plugins);
+        let plugins = RouterPluginBuilder::new(self.plugins); // KV 路由
         plugins.validate_config(&engine_config.local_model().router_config().kv_router_config)?;
 
         // Callers that reach the frontend without going through `run_input`
@@ -118,11 +118,11 @@ impl HttpFrontend {
         // is taken before initialization because `spawn_workers` reads the
         // registration count to decide whether the process-wide sinks follow
         // this runtime's token.
-        let active_input = crate::request_trace::ActiveInput::register();
+        let active_input = crate::request_trace::ActiveInput::register(); // 注册请求追踪
 
         super::initialize_input(&distributed_runtime, &engine_config).await;
 
-        let result = run_with_router_plugins(
+        let result = run_with_router_plugins( // 运行 HTTP 服务
             distributed_runtime,
             engine_config,
             self.frontend_route_extensions,
@@ -130,7 +130,7 @@ impl HttpFrontend {
         )
         .await;
 
-        active_input.release_and_drain().await;
+        active_input.release_and_drain().await; // 前面的服务一直运行，退出后执行清理
 
         result
     }
@@ -162,9 +162,11 @@ async fn run_with_router_plugins(
     distributed_runtime: DistributedRuntime,
     engine_config: EngineConfig,
     frontend_route_extensions: Vec<FrontendRouteExtension>,
-    plugins: RouterPluginBuilder,
+    plugins: RouterPluginBuilder, // RouterPlugin 路由插件
 ) -> anyhow::Result<()> {
+    // 拿出之前的 model config
     let local_model = engine_config.local_model();
+    // 检查 TLS
     let mut http_service_builder = match (
         local_model.tls_cert_path(),
         local_model.tls_key_path(),
@@ -192,6 +194,7 @@ async fn run_with_router_plugins(
                 .tls_client_ca_cert_path(tls_client_ca_cert_path.map(Path::to_path_buf))
                 .port(local_model.http_port())
         }
+        // 创建 HTTP 服务的 builder 设置监听端口
         (None, None, None) => service_v2::HttpService::builder().port(local_model.http_port()),
         (None, None, Some(_)) => {
             anyhow::bail!("--tls-client-ca-cert-path requires --tls-cert-path and --tls-key-path");
@@ -203,13 +206,17 @@ async fn run_with_router_plugins(
             );
         }
     };
+    // 设置监听地址
     if let Some(http_host) = local_model.http_host() {
         http_service_builder = http_service_builder.host(http_host);
     }
+    // 监听地址和端口就是 用户访问的地方 such as http://127.0.0.1:18080/v1/chat/completions
     http_service_builder =
         http_service_builder.cancel_token(Some(distributed_runtime.primary_token()));
+    // 设置请求的默认值， 比如 temperature model 啥的
     http_service_builder =
         http_service_builder.with_request_template(engine_config.local_model().request_template());
+    // 补上监控和API啥的
     http_service_builder = http_service_builder
         .metrics_config(local_model.metrics_config().clone())
         .frontend_api_config(local_model.frontend_api_config().clone());
@@ -220,10 +227,12 @@ async fn run_with_router_plugins(
 
     // Wire DRT discovery so that router metrics (dynamo_router_*) are registered
     // with the instance_id as the router_id label.
+    // 把 runtime 已经有的资源啥的也给 HTTP 这样就方便展示
     http_service_builder =
         http_service_builder.drt_discovery(Some(distributed_runtime.discovery()));
     http_service_builder =
         http_service_builder.runtime(Some(Arc::new(distributed_runtime.clone())));
+    // 拓展 看不懂跳过
     for extension in frontend_route_extensions {
         http_service_builder = http_service_builder.add_frontend_route_extension_arc(extension);
     }
@@ -235,23 +244,27 @@ async fn run_with_router_plugins(
             ref prefill_load_estimator,
         } => {
             // Pass the discovery client so the /health endpoint can query active instances
+            // 让 HTTP 也增加服务发现和查询活跃的例子的能力
             http_service_builder =
                 http_service_builder.discovery(Some(distributed_runtime.discovery()));
+            // 在这里真正 build service，只是创建了，还没启动
             let http_service = http_service_builder.build()?;
 
+            // 取出之前的配置
             let router_config = model.router_config();
             let migration_limit = model.migration_limit();
             let migration_max_seq_len = model.migration_max_seq_len();
             // Listen for models registering themselves, add them to HTTP service
             // Create namespace filter from model configuration
+            // 过滤器
             let namespace_filter = NamespaceFilter::from_namespace_and_prefix(
                 model.namespace(),
-                model.namespace_prefix(),
+                model.namespace_prefix(), // 匹配前缀
             );
             let local_model_path =
                 (!model.path().as_os_str().is_empty()).then(|| model.path().to_path_buf());
             let generate_engine_capabilities = http_service.generate_engine_capabilities();
-            run_watcher(
+            run_watcher( // 开始监听服务
                 distributed_runtime.clone(),
                 http_service.state().manager_clone(),
                 router_config.clone(),
@@ -317,7 +330,7 @@ async fn run_with_router_plugins(
             .map(|rd| rd.to_string())
             .collect::<Vec<String>>()
     );
-
+    // http 正式启动
     let run_result = http_service.run(distributed_runtime.primary_token()).await;
 
     // Initiate runtime shutdown whenever the server exits, including bind
@@ -339,6 +352,7 @@ fn enable_in_process_model_endpoints(http_service: &HttpService) -> anyhow::Resu
 
 /// Spawns a task that watches for new models in store,
 /// and registers them with the ModelManager so that the HTTP service can use them.
+// 启动服务：监听变化
 #[allow(clippy::too_many_arguments)]
 async fn run_watcher(
     runtime: DistributedRuntime,
@@ -364,7 +378,7 @@ async fn run_watcher(
         let cancel_token = runtime.primary_token();
         let _controller_handle = model_manager.start_lora_controller(cancel_token);
     }
-
+    // 将 model_manager 给这个watch_obj，然后watch_obj就一直监听，如果有新模型注册就放到model_manager
     let mut watch_obj = ModelWatcher::new_with_plugins(
         runtime.clone(),
         model_manager,
@@ -381,6 +395,13 @@ async fn run_watcher(
     watch_obj.set_tokenizer_fallback_enabled(tokenizer_fallback_enabled);
     watch_obj.set_generate_engine_capabilities(generate_engine_capabilities);
     tracing::debug!("Waiting for remote model");
+    // 拿到订阅模型的信息 注册一个注册信息变化的流
+    // such as
+    // 开始监听时：GPU0 的 worker 已注册 Qwen
+    // 开始监听时：GPU1 的 worker 已注册 Qwen
+
+    // 过了 10 秒：GPU2 的 worker 新注册了 Qwen
+    // 过了 20 秒：GPU1 的注册信息被移除
     let discovery = runtime.discovery();
     let discovery_stream = discovery
         .list_and_watch(
@@ -405,6 +426,16 @@ async fn run_watcher(
     });
 
     // Pass the discovery stream to the watcher
+    // 一直监听这个流
+    // 如果监听到就 ：
+    // 后台 watch_obj.watch()
+
+    // → controller 收到模型注册变化
+    // → 判断需要构建 WorkerSet，安排构建任务
+    // → host.prepare()
+    // → ModelWatcher::prepare()
+    // → prepare_worker_set()
+    // → 内部调用 build_pipeline()
     let _watcher_task = tokio::spawn(async move {
         watch_obj.watch(discovery_stream, namespace_filter).await;
     });

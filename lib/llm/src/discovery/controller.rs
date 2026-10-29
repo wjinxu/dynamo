@@ -322,11 +322,13 @@ impl<H: ControllerHost> ModelDiscoveryController<H> {
             RECONCILIATION_INTERVAL,
         );
         reconciliation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // 循环监听
         loop {
             self.start_queued_builds();
             let retry_deadline = self.next_retry_deadline();
 
             tokio::select! {
+                // 一直等待，知道有下一个事件到达
                 event = discovery_stream.next() => {
                     let Some(event) = event else {
                         tracing::warn!(
@@ -335,6 +337,7 @@ impl<H: ControllerHost> ModelDiscoveryController<H> {
                         break;
                     };
                     match event {
+                        // 然后开始把这个 event 放回去
                         Ok(event) => self.apply_event(event, &namespace_filter),
                         Err(error) => tracing::error!(%error, "Error in model discovery stream"),
                     }

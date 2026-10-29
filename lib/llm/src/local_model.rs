@@ -446,13 +446,13 @@ impl LocalModelBuilder {
         })
     }
 }
-
+// 保存模型信息和服务配置
 #[derive(Debug, Clone)]
 pub struct LocalModel {
-    full_path: PathBuf,
-    card: ModelDeploymentCard,
-    endpoint_id: EndpointId,
-    template: Option<RequestTemplate>,
+    full_path: PathBuf, // 模型目录
+    card: ModelDeploymentCard, // 模型描述信息
+    endpoint_id: EndpointId, // 服务 endpoint
+    template: Option<RequestTemplate>, // 。。。。
     http_host: Option<String>,
     http_port: u16,
     http_metrics_port: Option<u16>,

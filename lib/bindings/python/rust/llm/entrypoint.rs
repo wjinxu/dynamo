@@ -632,6 +632,7 @@ pub(crate) struct EngineConfig {
 
 /// Create the backend engine wrapper to run the model.
 /// Download the model if necessary.
+// 真正的创建前端
 #[pyfunction]
 #[pyo3(signature = (distributed_runtime, args))]
 pub fn make_engine<'p>(
@@ -639,7 +640,7 @@ pub fn make_engine<'p>(
     distributed_runtime: super::DistributedRuntime,
     args: EntrypointArgs,
 ) -> PyResult<Bound<'p, PyAny>> {
-    let mut builder = LocalModelBuilder::default();
+    let mut builder = LocalModelBuilder::default(); // 整理配置，如何创建这个前端
     builder
         .model_name(
             args.model_name
@@ -689,10 +690,16 @@ pub fn make_engine<'p>(
             builder.model_path(local_path);
         }
 
-        let local_model = builder.build().await.map_err(to_pyerr)?;
-        let inner = select_engine(distributed_runtime, args, local_model)
+        let local_model = builder.build().await.map_err(to_pyerr)?; // 构建模型描述
+        // 构建模型描述与前端服务配置；实际权重由 vLLM worker 加载
+        let inner = select_engine(distributed_runtime, args, local_model) // 根据指定的 engine 类型选择配置，再把 local_model 装进去
             .await
             .map_err(to_pyerr)?;
+    //     pub enum EngineType {
+    //     Echo = 1,  回显输入，验证路径
+    //     Dynamic = 2, 正常
+    //     Mocker = 3, 模拟推理行为
+    // }
         Ok(EngineConfig { inner })
     })
 }
@@ -863,10 +870,10 @@ pub fn run_input<'p>(
     .map_err(PyValueError::new_err)?;
     crate::future_into_py(py, async move {
         if matches!(&input_enum, Input::Http) {
-            HttpFrontend::default()
+            HttpFrontend::default() // 创建 HTTP 前端对象
                 .frontend_route_extensions(frontend_route_extensions)
                 .plugins(plugins)
-                .run(distributed_runtime.inner.clone(), engine_config.inner)
+                .run(distributed_runtime.inner.clone(), engine_config.inner) // 带着通信 runtime 和 engine 配置启动服务
                 .await
                 .map_err(to_pyerr)?;
             return Ok(());

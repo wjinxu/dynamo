@@ -469,6 +469,16 @@ where
 
 impl PreprocessedRouting {
     /// The normal way to build an inference pipeline. Connect this directly to HTTP layer.
+    // 创建一个真实 request 流转的流水线
+    // messages：“你好”
+    //     ↓ 预处理
+    // token IDs
+    //     ↓ 路由
+    // 选择某个 Qwen worker，把请求发过去
+    //     ↓ worker 调用 vLLM
+    // 生成输出 token
+    //     ↓ 响应处理
+    // 转成文字，返回客户
     pub fn build_pipeline<Req, Resp>(
         &self,
         card: &ModelDeploymentCard,
@@ -497,7 +507,7 @@ impl PreprocessedRouting {
         let encoder_op = self.encoder_router.into_operator();
         let backend = ServiceBackend::from_engine(self.backend_engine.clone());
 
-        let engine = frontend
+        let engine = frontend // 创建流水线
             .link(preprocessor_op.forward_edge())?
             .link(migration.forward_edge())?
             .link(token_backend.forward_edge())?

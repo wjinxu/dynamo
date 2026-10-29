@@ -10,13 +10,13 @@ use crate::engine::{AsyncEngineController, EngineContextGuard};
 use async_trait::async_trait;
 
 use super::registry::Registry;
-
+// 将 request 封住成流转的形式
 pub struct Context<T: Data> {
     current: T,
-    controller: Arc<Controller>, //todo: hold this as an arc
-    registry: Registry,
-    stages: Vec<String>,
-    metadata: BTreeMap<String, String>,
+    controller: Arc<Controller>, //todo: hold this as an arc // 请求 ID、停止和取消控制
+    registry: Registry, // 各处理阶段附带的消息
+    stages: Vec<String>, // 处理阶段记录
+    metadata: BTreeMap<String, String>, // 元数据
 }
 
 impl<T: Send + Sync + 'static> Context<T> {

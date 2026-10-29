@@ -371,7 +371,7 @@ async def async_main():
     # bind that port before the worker, causing port conflicts and/or scraping the
     # wrong metrics endpoint.
     os.environ.pop("DYN_SYSTEM_PORT", None)
-    config, vllm_flags, sglang_flags = parse_args()
+    config, vllm_flags, sglang_flags = parse_args() # 读取启动参数(such as http-port --router-mode)
     dump_config(config.dump_config_to, config)
     max_seq_info = (
         f", max_seq_len: {config.migration_max_seq_len}"
@@ -398,12 +398,12 @@ async def async_main():
     # the CLI flags are silently ignored (unlike the lazily-dialed TCP planes).
     _export_transport_tls_env(config)
     warn_if_frontend_cpu_affinity_spans_numa_nodes(logger)
-    runtime = DistributedRuntime(
+    runtime = DistributedRuntime( # DistributedRuntime 通信运行环境
         loop,
-        config.discovery_backend,
-        config.request_plane,
-        event_plane=config.event_plane,
-        response_plane=config.response_plane,
+        config.discovery_backend, # 服务发现方式，例如 file、etcd、kubernetes
+        config.request_plane, # 向 worker 发送生成请求
+        event_plane=config.event_plane, # 传递事件，例如缓存状态变化
+        response_plane=config.response_plane, # 将 worker 的生成结果传回来
     )
 
     def signal_handler():
@@ -416,7 +416,7 @@ async def async_main():
     # Shared with the backends so a worker's advertised config is built from the
     # same flags and semantics. --router-mode always has a default here, so this
     # never returns None.
-    router_config = build_router_config(config)
+    router_config = build_router_config(config) # 整理路由配置和前端配置
 
     metrics_prefix = (
         config.metrics_prefix
@@ -475,8 +475,8 @@ async def async_main():
     if config.router_prefill_load_model == "ais":
         kwargs["ais_perf_config"] = AisPerfConfig(**config.ais_perf_kwargs())
 
-    e = EntrypointArgs(EngineType.Dynamic, **kwargs)
-    engine = await make_engine(runtime, e)
+    e = EntrypointArgs(EngineType.Dynamic, **kwargs) # 创建前端engine
+    engine = await make_engine(runtime, e) # 创建前端engine
     frontend_route_extensions = load_frontend_route_extensions(
         config.frontend_route_extensions
     )
@@ -487,10 +487,15 @@ async def async_main():
         elif config.kserve_grpc_server:
             await run_input(runtime, "grpc", engine)
         else:
-            await run_input(runtime, "http", engine, frontend_route_extensions)
+            await run_input(runtime, "http", engine, frontend_route_extensions) # 根据入口类型，启动对应的服务
     except asyncio.exceptions.CancelledError:
         pass
 
+# 读取配置
+# → 创建通信 runtime
+# → 整理路由配置
+# → make_engine：装好请求处理体系
+# → run_input：开放 HTTP 入口，等待请求
 
 async def graceful_shutdown(runtime: DistributedRuntime) -> None:
     """Handle graceful shutdown of the distributed runtime.

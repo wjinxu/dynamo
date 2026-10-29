@@ -662,6 +662,15 @@ impl Model {
     pub fn get_chat_engine_with_parsing(
         &self,
     ) -> Result<(OpenAIChatCompletionsStreamingEngine, ParsingOptions), ModelManagerError> {
+        // 选择对应的 Workset
+        // Workset 概念 ： 可以相互替代的服务
+        // Model：Qwen3.8-27B
+        // └── WorkerSet：这一组 Qwen 服务
+        //     ├── worker0：GPU0，完整模型，TP1
+        //     ├── worker1：GPU1，完整模型，TP1
+        //     ├── worker2：GPU2，完整模型，TP1
+        //     └── worker3：GPU3，完整模型，TP1
+        // 如果只有一个 worker 就只能这个，要不然就要进入 select_worker_set_with 选择一个 worker
         self.select_worker_set_with(|ws| ws.chat_engine.clone().map(|e| (e, ws.parsing_options())))
             .ok_or_else(|| self.engine_error(self.has_chat_engine()))
     }
@@ -742,6 +751,7 @@ impl Model {
     /// The `extract` closure should return `Some(value)` if the WorkerSet has the
     /// desired engine, or `None` if it doesn't.
     ///
+    // 负责选哪一个具体的 worker
     fn select_worker_set_with<T, F>(&self, extract: F) -> Option<T>
     where
         F: Fn(&WorkerSet) -> Option<T>,
@@ -750,6 +760,7 @@ impl Model {
         // eligibility, so a concurrent add/remove can't make us treat a
         // namespace as complete while routing to a set that lost a peer. It also
         // avoids re-entering the DashMap mid-iteration, which can deadlock.
+        // 把当前的 WorkerSet 收集成一份候选列表
         let snapshot: Vec<Arc<WorkerSet>> = self
             .worker_sets
             .iter()
@@ -771,7 +782,7 @@ impl Model {
                 self.evaluate_namespace(&in_ns).ready
             })
             .collect();
-
+        // 只有一组直接返回
         // Fast path: single set (same zero-worker filtering as the multi-set path below)
         if snapshot.len() == 1 {
             let ws = &snapshot[0];

@@ -1511,7 +1511,7 @@ impl ModelManager {
             crate::protocols::openai::ParsingOptions,
         ),
         ModelManagerError,
-    > {
+    > { // 根据模型名字找到对应的 Model
         self.catalog
             .load()
             .models

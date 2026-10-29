@@ -867,6 +867,7 @@ impl HttpService {
     }
 
     pub async fn run(&self, cancel_token: CancellationToken) -> Result<()> {
+        // 调用 run inner内部
         self.run_inner(cancel_token, None, None).await
     }
 
@@ -1034,10 +1035,10 @@ impl HttpService {
 
             // Spawn canary after all fallible startup so it won't leak on early errors
             tokio::spawn(tokio_metrics_and_canary_loop(cancel_token.clone()));
-
+            // 持续提供 HTTP 服务
             let state = self.state.clone();
             axum::serve(listener, router)
-                .with_graceful_shutdown(async move {
+                .with_graceful_shutdown(async move { //如果停止的话
                     observer.cancelled_owned().await;
                     state.start_draining();
                     tracing::info!("HTTP server shutdown requested");
